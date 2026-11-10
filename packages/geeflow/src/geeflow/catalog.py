@@ -7,20 +7,29 @@ catalog) so search works with a single cached download instead of crawling STAC.
 from __future__ import annotations
 
 import json
-import tempfile
+import os
 import time
 import urllib.request
 from pathlib import Path
 
+# Pinned to a reviewed commit (not `master`) so upstream changes can't silently alter
+# what is loaded. Bump deliberately; override with GEEFLOW_CATALOG_COMMIT if needed.
+CATALOG_COMMIT = os.environ.get(
+    "GEEFLOW_CATALOG_COMMIT", "1a88a4ebbb4d26e220c72493e860347261e5edd1"
+)
 CATALOG_URL = (
     "https://raw.githubusercontent.com/samapriya/Earth-Engine-Datasets-List/"
-    "master/gee_catalog.json"
+    f"{CATALOG_COMMIT}/gee_catalog.json"
 )
 _CACHE_TTL_S = 7 * 24 * 3600  # the catalog changes slowly; refresh weekly
 
 
 def _cache_path() -> Path:
-    return Path(tempfile.gettempdir()) / "geeflow_gee_catalog.json"
+    # Per-user cache dir rather than the shared system temp dir, where another local
+    # user could pre-plant the file.
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "geeflow"
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return base / f"gee_catalog_{CATALOG_COMMIT[:12]}.json"
 
 
 def load_catalog(refresh: bool = False) -> list[dict]:
@@ -32,7 +41,9 @@ def load_catalog(refresh: bool = False) -> list[dict]:
     try:
         with urllib.request.urlopen(CATALOG_URL, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-    except OSError as e:
+        if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+            raise ValueError("catalog JSON is not a list of objects")
+    except (OSError, ValueError) as e:
         if cache.exists():  # stale cache beats no data
             with open(cache, encoding="utf-8") as f:
                 return json.load(f)

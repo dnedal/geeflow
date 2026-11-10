@@ -18,9 +18,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "earthengine-api>=1.4",
-    "pydantic>=2.7",
-    "mcp>=1.2",
+    "earthengine-api>=1.4,<2",
+    "pydantic>=2.7,<3",
+    "mcp>=1.2,<2",
 ]
 
 [project.optional-dependencies]
@@ -30,7 +30,8 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 geeflow-mcp = "geeflow.mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/prahaladuk2208-arch/geeflow"
+Homepage = "https://github.com/dnedal/geeflow"
+Upstream = "https://github.com/P-Srikanthan/geeflow"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geeflow"]

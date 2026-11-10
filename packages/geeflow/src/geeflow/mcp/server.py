@@ -16,6 +16,8 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
+from geeflow.mcp._guard import confine, exec_allowed
+
 mcp = FastMCP(
     "geeflow",
     instructions=(
@@ -23,7 +25,8 @@ mcp = FastMCP(
         "composites, spectral indices, thumbnails, stats, exports, training-polygon "
         "sampling. Call gee_init first. Composite tools return a composite_id used by "
         "later calls. Prefer the typed tools; use execute_code for anything they "
-        "don't cover."
+        "don't cover (only available if the user enabled it). File paths must lie "
+        "inside the user's GEEFLOW_WORKSPACE."
     ),
 )
 
@@ -62,17 +65,18 @@ def _resolve_region(lat: float | None, lon: float | None, radius_m: float | None
 
 
 @mcp.tool()
-def gee_init(project_id: str | None = None, service_account_key: str | None = None) -> str:
+def gee_init(project_id: str | None = None) -> str:
     """Initialize Earth Engine. Call this first in every session.
+
+    Uses the cached user credentials from `earthengine authenticate`. (Service-account
+    key files are deliberately not accepted over MCP; use the Python API/CLI for those.)
 
     Args:
         project_id: Google Cloud project with Earth Engine enabled.
-        service_account_key: path to a service-account key JSON (optional; otherwise
-            cached user credentials from `earthengine authenticate` are used).
     """
     from geeflow.session import init_ee
 
-    init_ee(project_id, service_account_key)
+    init_ee(project_id)
     return f"Earth Engine initialized (project={project_id or 'default credentials'})"
 
 
@@ -316,10 +320,12 @@ def sample_polygons(
         class_labels: readable names parallel to class_values.
         points_per_class: polygons wanted per class.
         polygon_size_m: side length of the generated squares.
-        save_path: optionally write the GeoJSON to this file path.
+        save_path: optionally write the GeoJSON to this new file (must be inside
+            GEEFLOW_WORKSPACE; existing files are never overwritten).
     """
     from geeflow.sampling import sample_reference_polygons
 
+    out_path = confine(save_path, for_write=True) if save_path else None
     region = _resolve_region(lat, lon, radius_m, aoi_geojson)
     fc = sample_reference_polygons(
         dataset_id=dataset_id,
@@ -334,16 +340,16 @@ def sample_polygons(
     for f in fc["features"]:
         counts[f["properties"]["label"]] = counts.get(f["properties"]["label"], 0) + 1
     result: dict = {"polygons_per_class": counts, "warnings": fc.get("warnings", [])}
-    if save_path:
-        with open(save_path, "w", encoding="utf-8") as fh:
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "x", encoding="utf-8") as fh:  # "x": fail if it appeared meanwhile
             json.dump({"type": "FeatureCollection", "features": fc["features"]}, fh, indent=2)
-        result["saved_to"] = save_path
+        result["saved_to"] = str(out_path)
     else:
         result["geojson"] = {"type": "FeatureCollection", "features": fc["features"]}
     return result
 
 
-@mcp.tool()
 def execute_code(code: str) -> dict:
     """Run Python code with the Earth Engine API for anything the typed tools don't cover.
 
@@ -351,7 +357,9 @@ def execute_code(code: str) -> dict:
     climate data, custom reducers...). Prefer the typed tools when one fits — they are
     more reliable and their workflows are reproducible.
 
-    The code runs locally in the server process with YOUR Earth Engine credentials.
+    The code runs locally, UNSANDBOXED, in the server process with the user's file
+    system access and Earth Engine credentials. Only registered when the user sets
+    GEEFLOW_ALLOW_EXEC=1.
     Pre-imported: `ee` (initialized via gee_init), `geeflow`, `json`. To return data,
     assign to a variable named `result` and/or print(); keep .getInfo() payloads small.
 
@@ -383,6 +391,10 @@ def execute_code(code: str) -> dict:
     return output
 
 
+if exec_allowed():
+    mcp.tool()(execute_code)
+
+
 # --------------------------------------------------------------- LULC tools (optional)
 
 try:
@@ -395,11 +407,26 @@ except ImportError:
 
 if _HAS_LULC:
 
-    def _pipeline(config_path: str, logs: list[str]):
+    def _load_cfg(config_path: str):
+        """Load a lulc.yaml from inside the workspace and require every file path it
+        resolves to (outputs, training data, feature selections) to stay inside too."""
         from lulc_engine.config import load_config
+
+        cfg = load_config(confine(config_path))
+        templates = [cfg.output_dir, cfg.training.path, cfg.classifier.feature_selection]
+        for t in templates:
+            years = cfg.time_points if "{year}" in t else [None]
+            for y in years:
+                confine(cfg.resolve_path(t, y))
+        aoi_file = getattr(cfg.aoi, "geojson", None)
+        if aoi_file:
+            confine(cfg.resolve_path(str(aoi_file)))
+        return cfg
+
+    def _pipeline(config_path: str, logs: list[str]):
         from lulc_engine.pipeline import Pipeline
 
-        return Pipeline(load_config(config_path), initialize=False, log=logs.append)
+        return Pipeline(_load_cfg(config_path), initialize=False, log=logs.append)
 
     @mcp.tool()
     def lulc_validate(config_path: str) -> dict:
@@ -409,9 +436,8 @@ if _HAS_LULC:
             config_path: path to the project's lulc.yaml.
         """
         from geeflow.composite.builder import sensors_for
-        from lulc_engine.config import load_config
 
-        cfg = load_config(config_path)
+        cfg = _load_cfg(config_path)
         return {
             "project": cfg.project.name,
             "classes": dict(cfg.sorted_class_items()),
@@ -501,9 +527,8 @@ if _HAS_LULC:
         and export training polygons bound to the project's AOI, sensor and classes.
         """
         from lulc_engine.collector import render_collector
-        from lulc_engine.config import load_config
 
-        return render_collector(load_config(config_path), year)
+        return render_collector(_load_cfg(config_path), year)
 
 
 def main() -> None:

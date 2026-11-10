@@ -1,5 +1,22 @@
 # geeflow
 
+> **Hardened fork** of [P-Srikanthan/geeflow](https://github.com/P-Srikanthan/geeflow).
+> Differences from upstream:
+> - `execute_code` (unsandboxed local Python) is **not registered** unless the MCP server
+>   environment sets `GEEFLOW_ALLOW_EXEC=1`.
+> - Every file path a tool reads or writes (`sample_polygons` `save_path`, `lulc_*`
+>   `config_path`, and the output/training/AOI paths inside that config) must resolve
+>   (symlinks followed) inside `GEEFLOW_WORKSPACE` (one or more dirs, `:`-separated).
+>   Unset = file access refused. Writes never overwrite existing files.
+> - `gee_init` no longer accepts a service-account key path; cached user credentials only.
+> - The dataset-catalog index is fetched from a pinned commit and cached under
+>   `~/.cache/geeflow` instead of the shared temp dir.
+> - Dependencies have upper major-version bounds.
+>
+> Example Claude Code registration:
+> `claude mcp add geeflow -e GEEFLOW_WORKSPACE=$HOME/gee_work -e GEEFLOW_ALLOW_EXEC=1 -- geeflow-mcp`
+
+
 **An MCP server that lets Claude run Google Earth Engine.**
 
 Ask Claude to build a cloud-free satellite image of anywhere on Earth, compute
