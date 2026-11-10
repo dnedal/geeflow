@@ -8,7 +8,9 @@
 >   `config_path`, and the output/training/AOI paths inside that config) must resolve
 >   (symlinks followed) inside `GEEFLOW_WORKSPACE` (one or more dirs, `:`-separated).
 >   Unset = file access refused. Writes never overwrite existing files.
-> - `gee_init` no longer accepts a service-account key path; cached user credentials only.
+> - `gee_init` no longer accepts a key path. A service account is configured via
+>   `GEEFLOW_SA_KEY` in the server environment and requests the Earth Engine scope
+>   only; a broken key raises rather than falling back to user credentials.
 > - The dataset-catalog index is fetched from a pinned commit and cached under
 >   `~/.cache/geeflow` instead of the shared temp dir.
 > - Dependencies have upper major-version bounds.

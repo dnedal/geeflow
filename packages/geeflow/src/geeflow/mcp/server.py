@@ -68,8 +68,9 @@ def _resolve_region(lat: float | None, lon: float | None, radius_m: float | None
 def gee_init(project_id: str | None = None) -> str:
     """Initialize Earth Engine. Call this first in every session.
 
-    Uses the cached user credentials from `earthengine authenticate`. (Service-account
-    key files are deliberately not accepted over MCP; use the Python API/CLI for those.)
+    Uses the service-account key named by GEEFLOW_SA_KEY in the server environment if
+    set (Earth Engine scope only), else cached user credentials from
+    `earthengine authenticate`. Key paths are deliberately not accepted as arguments.
 
     Args:
         project_id: Google Cloud project with Earth Engine enabled.
